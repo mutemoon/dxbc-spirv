@@ -85,6 +85,7 @@ private:
 
   std::unordered_map<ir::Type, uint32_t> m_types;
   std::unordered_map<ir::SsaDef, ir::SsaDef> m_debugNames;
+  std::unordered_map<ir::SsaDef, std::vector<ir::SsaDef>> m_debugMemberNames;
   std::unordered_map<SpirvPointerTypeKey, uint32_t> m_ptrTypes;
   std::unordered_map<SpirvFunctionTypeKey, uint32_t> m_funcTypes;
   std::unordered_map<SpirvImageTypeKey, uint32_t> m_imageTypes;
@@ -314,7 +315,7 @@ private:
 
   void emitDebugTypeName(ir::SsaDef def, uint32_t id, const char* suffix);
 
-  void emitDebugMemberNames(ir::SsaDef def, uint32_t structId);
+  void emitDebugMemberNames(ir::SsaDef def, uint32_t structId, const ir::Type* structType = nullptr);
 
   void emitDebugPushDataName(const PushDataInfo& pushData, uint32_t structId, uint32_t memberIdx);
 

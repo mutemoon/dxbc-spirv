@@ -620,8 +620,36 @@ ir::SsaDef ResourceMap::declareUavCounter(
 
 void ResourceMap::emitDebugName(ir::Builder& builder, const ResourceInfo* info) {
   if (m_converter.m_options.includeDebugNames) {
-    auto name = m_converter.makeRegisterDebugName(info->regType, info->regIndex, WriteMask());
+    std::string name;
+
+    uint32_t rdefType = 0; // 0 = CBuffer, 2 = Texture, 3 = Sampler, 4 = UAV
+    if (info->regType == RegisterType::eCbv) rdefType = 0;
+    else if (info->regType == RegisterType::eResource) rdefType = 2;
+    else if (info->regType == RegisterType::eSampler) rdefType = 3;
+    else if (info->regType == RegisterType::eUav) rdefType = 4;
+
+    const auto* binding = m_converter.getRdef().findBinding(rdefType, info->regIndex);
+    if (binding && !binding->name.empty()) {
+      name = binding->name;
+    } else {
+      name = m_converter.makeRegisterDebugName(info->regType, info->regIndex, WriteMask());
+    }
+
     builder.add(ir::Op::DebugName(info->resourceDef, name.c_str()));
+
+    if (info->regType == RegisterType::eCbv) {
+      const auto* cb = m_converter.getRdef().findCBufferByBinding(info->regIndex);
+      if (!cb && binding)
+        cb = m_converter.getRdef().findCBufferByName(binding->name);
+
+      if (cb) {
+        for (const auto& var : cb->variables) {
+          if (!var.name.empty()) {
+            builder.add(ir::Op::DebugMemberName(info->resourceDef, var.startOffset, var.name.c_str()));
+          }
+        }
+      }
+    }
   }
 }
 

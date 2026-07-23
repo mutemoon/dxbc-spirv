@@ -100,6 +100,8 @@ void SpirvBuilder::processDebugNames() {
       m_debugNames.insert_or_assign(ir::SsaDef(op->getOperand(0u)), op->getDef());
     else if (op->getOpCode() == ir::OpCode::eSemantic)
       m_debugNames.insert({ ir::SsaDef(op->getOperand(0u)), op->getDef() });
+    else if (op->getOpCode() == ir::OpCode::eDebugMemberName)
+      m_debugMemberNames[ir::SsaDef(op->getOperand(0u))].push_back(op->getDef());
   }
 }
 
@@ -1116,18 +1118,12 @@ void SpirvBuilder::emitDclSampler(const ir::Op& op) {
 
 
 void SpirvBuilder::emitDclCbv(const ir::Op& op) {
-  /* Create a wrapper struct that we can decorate as a block */
+  /* defType already returns a struct type for CBuffers */
   auto structTypeId = defType(op.getType(), true, op.getDef());
 
-  if (!op.getType().isStructType()) {
-    structTypeId = defStructWrapper(structTypeId);
-
-    if (m_options.includeDebugNames)
-      setDebugMemberName(structTypeId, 0u, "m");
-  }
-
-  if (m_options.includeDebugNames)
+  if (m_options.includeDebugNames) {
     emitDebugTypeName(op.getDef(), structTypeId, "_buf");
+  }
 
   pushOp(m_decorations, spv::OpDecorate, structTypeId, spv::DecorationBlock);
 
@@ -2994,16 +2990,33 @@ void SpirvBuilder::emitDebugTypeName(ir::SsaDef def, uint32_t id, const char* su
 }
 
 
-void SpirvBuilder::emitDebugMemberNames(ir::SsaDef def, uint32_t structId) {
-  auto [a, b] = m_builder.getUses(def);
+void SpirvBuilder::emitDebugMemberNames(ir::SsaDef def, uint32_t structId, const ir::Type* structType) {
+  if (!m_options.includeDebugNames)
+    return;
 
-  for (auto op = a; op != b; op++) {
-    if (op->getOpCode() == ir::OpCode::eDebugMemberName) {
-      dxbc_spv_assert(ir::SsaDef(op->getOperand(0u)) == def);
+  auto e = m_debugMemberNames.find(def);
+  if (e == m_debugMemberNames.end())
+    return;
 
-      auto member = uint32_t(op->getOperand(1u));
-      setDebugMemberName(structId, member, op->getLiteralString(2u).c_str());
+  for (ir::SsaDef debugDef : e->second) {
+    const auto& op = m_builder.getOp(debugDef);
+    uint32_t val = uint32_t(op.getOperand(1u));
+
+    uint32_t memberIdx = val;
+    if (structType && structType->isStructType()) {
+      bool found = false;
+      for (uint32_t m = 0; m < structType->getStructMemberCount(); ++m) {
+        if (structType->byteOffset(m) == val) {
+          memberIdx = m;
+          found = true;
+          break;
+        }
+      }
+      if (!found)
+        continue;
     }
+
+    setDebugMemberName(structId, memberIdx, op.getLiteralString(2u).c_str());
   }
 }
 
@@ -4393,7 +4406,7 @@ uint32_t SpirvBuilder::defType(const ir::Type& type, bool explicitLayout, ir::Ss
     }
 
     if (m_options.includeDebugNames && dclOp)
-      emitDebugMemberNames(dclOp, id);
+      emitDebugMemberNames(dclOp, id, &type);
 
     return id;
   }

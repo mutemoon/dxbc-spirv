@@ -153,6 +153,17 @@ util::ByteReader Container::getInterfaceChunk() const {
 }
 
 
+util::ByteReader Container::getResourceDefinitionChunk() const {
+  auto chunk = findChunk(util::FourCC("RD11"));
+  if (!chunk)
+    chunk = findChunk(util::FourCC("RDEF"));
+  if (chunk && chunk.getSize() >= sizeof(ChunkHeader)) {
+    chunk = chunk.getRangeRelative(sizeof(ChunkHeader), chunk.getSize() - sizeof(ChunkHeader));
+  }
+  return chunk;
+}
+
+
 bool Container::validateHash() const {
   auto digest = hashDxbcBinary(m_reader.getData(0u), m_reader.getSize());
   return m_header.hash == digest;

@@ -87,6 +87,9 @@ public:
   /** Finds interface chunk */
   util::ByteReader getInterfaceChunk() const;
 
+  /** Finds resource definition chunk */
+  util::ByteReader getResourceDefinitionChunk() const;
+
   /** Checks whether the binary hash is valid */
   bool validateHash() const;
 

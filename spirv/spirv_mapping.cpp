@@ -11,7 +11,8 @@ ResourceMapping::~ResourceMapping() {
 
 
 
-BasicResourceMapping::BasicResourceMapping() {
+BasicResourceMapping::BasicResourceMapping(uint32_t setIndex, uint32_t bindingOffset)
+: m_setIndex(setIndex), m_bindingOffset(bindingOffset) {
 
 }
 
@@ -23,8 +24,8 @@ BasicResourceMapping::~BasicResourceMapping() {
 
 DescriptorBinding BasicResourceMapping::mapDescriptor(ir::ScalarType, uint32_t, uint32_t) {
   DescriptorBinding binding = { };
-  binding.set = 0u;
-  binding.binding = m_descriptorIndex++;
+  binding.set = m_setIndex;
+  binding.binding = m_bindingOffset + m_descriptorIndex++;
   return binding;
 }
 

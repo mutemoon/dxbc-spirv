@@ -6,6 +6,7 @@
 #include "dxbc_parser.h"
 #include "dxbc_registers.h"
 #include "dxbc_resources.h"
+#include "dxbc_rdef.h"
 #include "dxbc_signature.h"
 #include "dxbc_types.h"
 
@@ -78,6 +79,12 @@ private:
   ResourceMap   m_resources;
   ControlFlow   m_controlFlow;
   Parser        m_parser;
+  RdefParser    m_rdef;
+
+public:
+  const RdefParser& getRdef() const { return m_rdef; }
+
+private:
 
   uint32_t      m_instructionCount = 0u;
 

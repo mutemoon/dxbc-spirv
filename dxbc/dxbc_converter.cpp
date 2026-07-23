@@ -11,7 +11,11 @@ Converter::Converter(Container container, const Options& options)
 , m_regFile   (*this)
 , m_ioMap     (*this)
 , m_resources (*this) {
-
+  auto rdefChunk = m_dxbc.getResourceDefinitionChunk();
+  if (rdefChunk) {
+    m_rdef = RdefParser(rdefChunk);
+    m_rdef.parse();
+  }
 }
 
 
