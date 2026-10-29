@@ -41,7 +41,7 @@ class BasicResourceMapping : public ResourceMapping {
 
 public:
 
-  BasicResourceMapping();
+  BasicResourceMapping(uint32_t setIndex = 0u, uint32_t bindingOffset = 0u);
 
   ~BasicResourceMapping();
 
@@ -55,7 +55,8 @@ public:
 
 private:
 
-  uint32_t m_descriptorIndex = 0u;
+  uint32_t m_setIndex = 0u;
+  uint32_t m_bindingOffset = 0u;
 
 };
 

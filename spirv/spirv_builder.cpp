@@ -867,7 +867,9 @@ void SpirvBuilder::emitDclIoVar(const ir::Op& op) {
     pushOp(m_decorations, spv::OpDecorate, varId, spv::DecorationIndex, std::exchange(location, 0u));
 
   pushOp(m_decorations, spv::OpDecorate, varId, spv::DecorationLocation, location);
-  pushOp(m_decorations, spv::OpDecorate, varId, spv::DecorationComponent, uint32_t(op.getOperand(2u)));
+  uint32_t component = uint32_t(op.getOperand(2u));
+  if (component != 0u)
+    pushOp(m_decorations, spv::OpDecorate, varId, spv::DecorationComponent, component);
 
   if (isInput && m_stage == ir::ShaderStage::ePixel) {
     auto interpolationModes = ir::InterpolationModes(op.getOperand(3u));

@@ -52,6 +52,9 @@ struct Options {
   bool uavBarriers = false;
   bool debugLog = false;
   bool compactIds = false;
+
+  uint32_t setIndex = 0u;
+  uint32_t bindingShift = 0u;
 };
 
 
@@ -195,9 +198,11 @@ bool writeSpirvBinary(ir::Builder builder, const Options& options, Timers& timer
     pass.lowerLegacyBuiltInToCbv(ir::BuiltIn::eLegacyPointArgs, 0u, cbv++);
     pass.lowerLegacyBuiltInToCbv(ir::BuiltIn::eLegacySamplerState, 0u, cbv++);
     pass.lowerLegacyBuiltInToCbv(ir::BuiltIn::eLegacyTextureStage, 0u, cbv++);
+
+    pass.mergeOverlappingIo();
   }
 
-  spirv::BasicResourceMapping mapping = { };
+  spirv::BasicResourceMapping mapping(options.setIndex, options.bindingShift);
 
   spirv::SpirvBuilder::Options spirvOptions = { };
   spirvOptions.includeDebugNames = !options.noDebug;
@@ -345,6 +350,8 @@ void printHelp(const char* appName) {
             << "                        no SPIR-V lowering will be performed." << std::endl
             << "    --ir file           Emit internal IR as a serialized binary to tge given file." << std::endl
             << "    --ir-asm            Emit disassembled IR to standard output." << std::endl
+            << "    --set val           Set the Descriptor Set index (default: 0)" << std::endl
+            << "    --binding-shift val Shift binding slot numbers by the given amount (default: 0)" << std::endl
             << std::endl
             << "    --convert-only      Only perform initial conversion to the initial IR and skip" << std::endl
             << "                        any further processing steps. Cannot be used with SPIR-V lowering." << std::endl
@@ -390,6 +397,10 @@ int main(int argc, char** argv) {
       options.compactIds = true;
     } else if (arg == "--debug") {
       options.debugLog = true;
+    } else if (arg == "--set" && i + 1 < argc) {
+      options.setIndex = std::stoul(argv[++i]);
+    } else if (arg == "--binding-shift" && i + 1 < argc) {
+      options.bindingShift = std::stoul(argv[++i]);
     } else {
       if (arg.size() >= 2u && arg[0] == '-' && arg[1] == '-') {
         std::cerr << "Invalid option: " << arg << std::endl;

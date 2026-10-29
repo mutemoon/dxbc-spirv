@@ -371,6 +371,14 @@ bool PropagateResourceTypeRewriteInfo::setupConstantBufferType() {
         auto mask = ((1u << component.accessSize) - 1u) << j;
         hasOverlap = hasOverlap || (accessMask & mask);
         accessMask |= mask;
+
+        /* WebGPU / WGSL natural alignment:
+         * vec2 requires 8-byte alignment (j must be 0 or 2).
+         * vec3/vec4 requires 16-byte alignment (j must be 0).
+         * If misaligned, mark as hasOverlap so the entire 16-byte slot is emitted as a naturally aligned vec4. */
+        uint32_t reqAlign = (component.accessSize == 2u) ? 8u : 16u;
+        if (((j * 4u) % reqAlign) != 0u)
+          hasOverlap = true;
       }
     }
 
@@ -419,6 +427,12 @@ bool PropagateResourceTypeRewriteInfo::setupConstantBufferType() {
               else if (scalarType != component.resolvedType)
                 break;
             }
+
+            /* WebGPU natural alignment: do not merge into a vector if the resulting vector would be misaligned */
+            uint32_t nextN = uint32_t(n + 1u);
+            uint32_t reqAlign = (nextN == 2u) ? 8u : 16u;
+            if (((j * 4u) % reqAlign) != 0u)
+              break;
 
             n++;
           }
@@ -490,6 +504,12 @@ bool PropagateResourceTypeRewriteInfo::setupResourceBufferType() {
           else if (scalarType != next.resolvedType)
             break;
         }
+
+        /* WebGPU natural alignment: do not merge into misaligned vector */
+        uint32_t nextSize = vectorSize + 1u;
+        uint32_t reqAlign = (nextSize == 2u) ? 8u : 16u;
+        if (((i * 4u) % reqAlign) != 0u)
+          break;
 
         vectorSize++;
       }
