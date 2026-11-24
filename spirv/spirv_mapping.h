@@ -57,7 +57,7 @@ private:
 
   uint32_t m_setIndex = 0u;
   uint32_t m_bindingOffset = 0u;
-  uint32_t m_descriptorIndex = 0u;
+
 
 };
 

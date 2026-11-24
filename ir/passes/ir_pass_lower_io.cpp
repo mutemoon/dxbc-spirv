@@ -1,3 +1,5 @@
+#include <map>
+#include <vector>
 #include "ir_pass_lower_io.h"
 #include "ir_pass_remove_unused.h"
 
@@ -1704,6 +1706,224 @@ bool LowerIoPass::inputNeedsComponentIndex(const Op& op) {
 
   /* Ignore the component index for scalar inputs */
   return false;
+}
+
+
+bool LowerIoPass::mergeOverlappingIo() {
+  bool a = mergeOverlappingInputs();
+  bool b = mergeOverlappingOutputs();
+  return a || b;
+}
+
+
+bool LowerIoPass::mergeOverlappingInputs() {
+  /* Scalarize all input loads first so that partial vector loads can be easily re-targeted */
+  scalarizeInputLoads();
+
+  /* Count declarations per (entryType, location) */
+  std::map<std::pair<IoEntryType, uint32_t>, std::vector<Builder::iterator>> inputsByLocation;
+
+  auto [a, b] = m_builder.getDeclarations();
+  for (auto iter = a; iter != b; ++iter) {
+    if (iter->getOpCode() == OpCode::eDclInput) {
+      auto info = IoMap::getEntryForOp(m_stage, *iter);
+      inputsByLocation[{info.getType(), info.getLocationIndex()}].push_back(iter);
+    }
+  }
+
+  bool changed = false;
+
+  for (const auto& [locKey, dcls] : inputsByLocation) {
+    auto [entryType, location] = locKey;
+
+    bool needsMerge = dcls.size() > 1u;
+    if (!needsMerge && !dcls.empty()) {
+      auto info = IoMap::getEntryForOp(m_stage, *dcls.front());
+      if (info.getFirstComponentIndex() != 0u)
+        needsMerge = true;
+    }
+
+    if (!needsMerge)
+      continue;
+
+    changed = true;
+
+    OutputInfo outputs = { };
+    for (auto dcl : dcls) {
+      auto info = IoMap::getEntryForOp(m_stage, *dcl);
+      auto scalarType = dcl->getType().getBaseType(0u).getBaseType();
+      if (outputs.scalarType == ScalarType::eVoid)
+        outputs.scalarType = scalarType;
+      else if (outputs.scalarType != scalarType)
+        outputs.scalarType = (outputs.interpolation & InterpolationMode::eFlat) ? ScalarType::eU32 : ScalarType::eF32;
+
+      if (dcl->getType().getArrayDimensions())
+        outputs.arraySize = dcl->getType().getArraySize(0u);
+
+      if (m_stage == ShaderStage::ePixel) {
+        auto dclInterpolation = InterpolationModes(dcl->getOperand(dcl->getFirstLiteralOperandIndex() + 2u));
+        outputs.interpolation |= dclInterpolation;
+      }
+    }
+
+    outputs.componentCounts[0] = 4u;
+    resolveMismatchedLocation(entryType, location, outputs);
+  }
+
+  if (changed) {
+    RemoveUnusedPass::runPass(m_builder);
+  }
+
+  return changed;
+}
+
+
+bool LowerIoPass::mergeOverlappingOutputs() {
+  std::map<std::pair<uint32_t, uint32_t>, std::vector<Builder::iterator>> outputsByLoc;
+
+  auto [a, b] = m_builder.getDeclarations();
+  for (auto iter = a; iter != b; ++iter) {
+    if (iter->getOpCode() == OpCode::eDclOutput) {
+      uint32_t stream = getStreamForIoVariable(*iter);
+      uint32_t location = uint32_t(iter->getOperand(1u));
+      outputsByLoc[{stream, location}].push_back(iter);
+    }
+  }
+
+  bool changed = false;
+
+  for (const auto& [key, dcls] : outputsByLoc) {
+    auto [stream, location] = key;
+
+    bool needsMerge = dcls.size() > 1u;
+    if (!needsMerge && !dcls.empty()) {
+      uint32_t comp = uint32_t(dcls.front()->getOperand(2u));
+      if (comp != 0u)
+        needsMerge = true;
+    }
+
+    if (!needsMerge)
+      continue;
+
+    changed = true;
+    resolveOverlappingOutputLocation(stream, location, dcls);
+  }
+
+  if (changed) {
+    RemoveUnusedPass::runPass(m_builder);
+  }
+
+  return changed;
+}
+
+
+void LowerIoPass::resolveOverlappingOutputLocation(
+        uint32_t stream,
+        uint32_t location,
+  const std::vector<Builder::iterator>& dcls) {
+  ScalarType scalarType = ScalarType::eVoid;
+  uint32_t arraySize = 0u;
+
+  for (auto dcl : dcls) {
+    auto type = dcl->getType().getBaseType(0u).getBaseType();
+    if (scalarType == ScalarType::eVoid)
+      scalarType = type;
+    else if (scalarType != type)
+      scalarType = ScalarType::eF32;
+
+    if (dcl->getType().getArrayDimensions())
+      arraySize = dcl->getType().getArraySize(0u);
+  }
+
+  if (scalarType == ScalarType::eVoid)
+    scalarType = ScalarType::eF32;
+
+  Type newType(scalarType, 4u);
+  if (arraySize)
+    newType.addArrayDimension(arraySize);
+
+  auto newVar = m_builder.add(Op::DclOutput(newType, m_entryPoint, location, 0u, stream));
+
+  for (auto dcl : dcls) {
+    const auto& oldVar = *dcl;
+    uint32_t baseComponent = uint32_t(oldVar.getOperand(2u));
+    bool isOldVector = oldVar.getType().getBaseType(0u).isVector();
+
+    util::small_vector<SsaDef, 256u> uses;
+    m_builder.getUses(oldVar.getDef(), uses);
+
+    for (auto use : uses) {
+      const auto& useOp = m_builder.getOp(use);
+      if (useOp.getOpCode() == OpCode::eOutputStore) {
+        auto oldAddressDef = SsaDef(useOp.getOperand(1u));
+        auto valueDef = SsaDef(useOp.getOperand(2u));
+
+        SsaDef newAddress = computeNewOutputStoreAddress(use, oldAddressDef, isOldVector, baseComponent);
+        m_builder.rewriteOp(use, Op::OutputStore(newVar, newAddress, valueDef));
+      } else {
+        m_builder.remove(use);
+      }
+    }
+
+    m_builder.removeOp(oldVar);
+  }
+}
+
+
+SsaDef LowerIoPass::computeNewOutputStoreAddress(
+        SsaDef insertBefore,
+        SsaDef oldAddress,
+        bool isOldVector,
+        uint32_t baseComponent) {
+  util::small_vector<SsaDef, 4u> addressComponents;
+
+  if (oldAddress) {
+    const auto& addressOp = m_builder.getOp(oldAddress);
+    auto addressType = addressOp.getType().getBaseType(0u);
+    uint32_t oldLen = addressType.isVector() ? addressType.getVectorSize() : 1u;
+    uint32_t keepLen = isOldVector ? (oldLen - 1u) : oldLen;
+
+    for (uint32_t i = 0u; i < keepLen; i++) {
+      addressComponents.push_back(addressType.isVector()
+        ? m_builder.addBefore(insertBefore, Op::CompositeExtract(addressType.getBaseType(), oldAddress, m_builder.makeConstant(i)))
+        : oldAddress);
+    }
+
+    if (isOldVector) {
+      const auto& addressOp = m_builder.getOp(oldAddress);
+      std::optional<uint32_t> constVal;
+      if (addressOp.isConstant()) {
+        constVal = uint32_t(addressOp.getOperand(oldLen - 1u));
+      } else if (addressOp.getOpCode() == OpCode::eCompositeConstruct) {
+        const auto& componentOp = m_builder.getOpForOperand(addressOp, oldLen - 1u);
+        if (componentOp.isConstant())
+          constVal = uint32_t(componentOp.getOperand(0u));
+      }
+
+      if (constVal) {
+        addressComponents.push_back(m_builder.makeConstant(baseComponent + *constVal));
+      } else {
+        SsaDef oldCompDef = addressType.isVector()
+          ? m_builder.addBefore(insertBefore, Op::CompositeExtract(addressType.getBaseType(), oldAddress, m_builder.makeConstant(oldLen - 1u)))
+          : oldAddress;
+        addressComponents.push_back(m_builder.addBefore(insertBefore,
+          Op::IAdd(ScalarType::eU32, oldCompDef, m_builder.makeConstant(baseComponent))));
+      }
+    } else {
+      addressComponents.push_back(m_builder.makeConstant(baseComponent));
+    }
+  } else {
+    addressComponents.push_back(m_builder.makeConstant(baseComponent));
+  }
+
+  if (addressComponents.size() == 1u) {
+    return addressComponents.front();
+  } else {
+    Op composite(OpCode::eCompositeConstruct, BasicType(ScalarType::eU32, addressComponents.size()));
+    for (auto c : addressComponents)
+      composite.addOperand(c);
+    return m_builder.addBefore(insertBefore, std::move(composite));
+  }
 }
 
 }

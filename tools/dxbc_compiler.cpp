@@ -198,6 +198,8 @@ bool writeSpirvBinary(ir::Builder builder, const Options& options, Timers& timer
     pass.lowerLegacyBuiltInToCbv(ir::BuiltIn::eLegacyPointArgs, 0u, cbv++);
     pass.lowerLegacyBuiltInToCbv(ir::BuiltIn::eLegacySamplerState, 0u, cbv++);
     pass.lowerLegacyBuiltInToCbv(ir::BuiltIn::eLegacyTextureStage, 0u, cbv++);
+
+    pass.mergeOverlappingIo();
   }
 
   spirv::BasicResourceMapping mapping(options.setIndex, options.bindingShift);

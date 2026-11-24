@@ -352,6 +352,14 @@ public:
    *  CBV. Returns the generated CBV for callers to inspect the type. */
   SsaDef lowerSpecConstantsToCbv(uint32_t regSpace, uint32_t regIndex);
 
+  /** Merges overlapping input and output variables sharing the same location
+   *  to satisfy WebGPU interface binding constraints. */
+  bool mergeOverlappingIo();
+
+  bool mergeOverlappingInputs();
+
+  bool mergeOverlappingOutputs();
+
 private:
 
   struct OutputInfo {
@@ -400,6 +408,10 @@ private:
   bool remapTessIoLocation(Builder::iterator op, uint32_t perPatchMask, uint32_t perVertexMask);
 
   bool rewriteMultisampledDescriptorUse(SsaDef descriptorDef);
+
+  void resolveOverlappingOutputLocation(uint32_t stream, uint32_t location, const std::vector<Builder::iterator>& dcls);
+
+  SsaDef computeNewOutputStoreAddress(SsaDef insertBefore, SsaDef oldAddress, bool isOldVector, uint32_t baseComponent);
 
   static uint32_t getStreamForIoVariable(const Op& op);
 
